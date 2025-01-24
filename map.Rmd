@@ -1,0 +1,123 @@
+---
+title: "Untitled"
+author: "Dani Blumstein"
+date: "2024-11-07"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(sf)
+library(cowplot)
+library(sp)
+library(raster)
+library(scales)
+library(geodata)
+library(tidyterra)
+library(ggspatial)
+library(terra)
+library(plotly)
+library(readxl)
+
+oregon <- st_read(dsn="map/GOVTUNIT_Oregon_State_Shape/Shape/GU_CountyOrEquivalent.shp")
+oregon2 <- st_read("map/Oregon_State_Boundary_-3464536586539257337/Oregon_State_Boundary.shp")
+oregon2 <- subset(oregon2, FEATURE =="3")
+
+river_list <- c("Coos River", "Coquille River", "Nestucca River", "Little Nestucca River", "North Umpqua River", "Siletz River", "Siuslaw River", "Sixes River", "South Umpqua River", "Tillamook River", "Trask River", "Umpqua River", "Wilson River", "Yaquina River", "Chetco River","Trinity River","Elk River","Klamath River", "Rogue River", "Nehalem River", "Miami River", "Necanicum River")
+            
+river <- st_read(dsn="map/ODFW_WSR_Pub20170815.gdb")
+
+#lines to help find the right Tribs and fill in some missing river parts
+#find<-subset(river, Reduce(`|`, lapply(river, \(x) x %in% "Wilson River")))
+
+COOR <- subset(river, TribToName %in% c("Coos River")) %>% 
+        subset(Name %in% c("Millicoma River", "South Fork Coos River"))
+COOR$ID <-"Coos River" 
+
+SIXR <- subset(river, TribToName %in% c("Sixes River")) %>% 
+        subset(Name %in% c("Edson Creek", "Dry Creek", "North Fork Sixes River"))
+SIXR$ID <-"Sixes River" 
+
+SIUR <- subset(river, TribToName %in% c("Siuslaw River")) %>% 
+        subset(Name %in% c("North Fork Siuslaw River","Lake Creek"))
+SIUR$ID <-"Siuslaw River" 
+
+SILR <- subset(river, TribToName %in% c("Siletz River")) %>% 
+        subset(Name %in% c("Cedar Creek", "Buck Creek", "Sunshine Creek"))
+SILR$ID <-"Siletz River" 
+
+
+rivers_filtered <- subset(river, Name %in% river_list)
+rivers_filtered = st_transform(rivers_filtered, "EPSG:4326")
+
+#remove the extra rogue river
+rivers_filtered = rivers_filtered[-1,]
+
+bbox_riv <- st_bbox(c(xmin = -125, xmax = -121.7, ymin = 42, ymax = 47))
+rivers_filtered <- st_crop(rivers_filtered, bbox_riv)
+
+bbox_org <- st_bbox(c(xmin = -124.5666, xmax = -116.4635, ymin = 41.9, ymax = 46.23747))
+oregon <- st_crop(oregon, bbox_org)
+
+
+#get elevation data
+elevation_data <- elevation_30s(country="USA", path=tempdir() )
+
+OR_elevation = as(extent(-124.5666, -116.4, 41.99,46.23747), 'SpatialPolygons')
+crs(OR_elevation) = "+proj=longlat +datum=WGS84 +no_defs"
+
+#crop the elevation data using the polygon
+dem = crop(elevation_data, OR_elevation, snap= 'out')
+## crop and mask
+r1 <- crop(dem, extent(oregon))
+r2 <- mask(r1, oregon)
+
+river_points <- read_excel("map/2020 Chinook DNA sample locations (1).xlsx")
+
+#convert from UTM to lat long
+crs <- "+proj=utm +zone=10"
+p1 <- vect(river_points, geom=c("DownUTME", "DownUTMN"), crs=crs)
+p2 <- project(p1, "+proj=longlat")
+
+
+main_map <- 
+ggplot() +
+  geom_sf(data = oregon, size = 1.5, color = "grey50", fill = "grey90")+
+  coord_sf()+
+  theme_bw()+
+  geom_rect(aes(xmin = -125, xmax = -121.7, ymin = 41.9, ymax = 46.4), color = "black", fill = NA, size = 1) 
+  
+
+inset <- ggplot() + 
+  #geom_sf(data = oregon2, size = 1.5, color = "grey50", fill = "grey90")+
+  geom_spatraster(data = r2, aes(fill = USA_elv_msk)) +
+  geom_sf(data = rivers_filtered, aes(color = Name), lwd = 1.2)+
+  geom_sf(data = COOR, aes(color = ID), lwd = 1.2)+
+  geom_sf(data = SILR, aes(color = ID), lwd = 1.2)+
+  geom_sf(data = SIUR, aes(color = ID), lwd = 1.2)+
+  geom_sf(data = SIXR, aes(color = ID), lwd = 1.2)+
+  #geom_sf(data = p2)+
+  scale_fill_gradient(high = "lightgrey", low = "#555",  na.value='transparent') +
+  labs(color = "River")+
+  theme_bw()+
+  #geom_sf_text(data = rivers_filtered,aes(label = Name),check_overlap = T)+
+  scale_color_manual(values = hcl.colors(23, "Zissou1", rev = FALSE)) +
+  coord_sf(xlim=c(-125, -121.7), ylim = c(41.99208,46.2991),datum = sf::st_crs(4326))+
+  scale_x_continuous(breaks = seq(-125, -121.7, by = 1), name = "Longitude (°W)")+
+  scale_y_continuous(name = "Latitude (°N)")+
+  theme(legend.justification = "top")+
+  annotation_scale(location = "bl", width_hint = 0.5) +
+  annotation_north_arrow(
+    location = "bl",
+    pad_x = unit(0, "in"),
+    pad_y = unit(0.3, "in"),
+    style = north_arrow_fancy_orienteering)
+
+ggdraw(inset) + draw_plot(
+  {
+    main_map+
+    coord_sf()+
+    theme(legend.position = "none")
+  }, 
+  x = 0.6, y = 0.03,  width = 0.3, height = 0.3)
+```

@@ -1,0 +1,510 @@
+---
+title: "costal_ots_NRT_analysis"
+author: "Dani Blumstein"
+date: "2024-11-14"
+output: html_document
+---
+
+```{r}
+library(adegenet)
+library(poppr)
+library(tidyverse)
+library(readxl)
+library(adegenet)
+library(dartR)
+library(RColorBrewer)
+library(igraph)
+library(hierfstat)
+library(reshape2)
+library(ggplot2)
+library(scales)
+library(devtools)
+library(splitstackshape)
+library(cowplot)
+library(gridGraphics)
+library(ggrepel)
+library(magrittr)
+
+if (!require("remotes")) install.packages("remotes")
+remotes::install_github("hhwagner1/LandGenCourse")
+library(LandGenCourse)
+
+if(!requireNamespace("LandGenCourseData", quietly = TRUE))
+            devtools::install_github("hhwagner1/LandGenCourseData")
+
+if(!requireNamespace("fields", quietly = TRUE)) install.packages("fields", repos='http://cran.us.r-project.org')
+  
+if(!requireNamespace("LEA", quietly = TRUE)) {  
+  if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+  BiocManager::install("LEA")
+}
+
+library(LEA)
+library(scatterpie)
+```
+
+```{r}
+#here are the two options, choosing neutral for now
+non_run_timing_genind
+neutral_genind
+pop(neutral_genind) <- meta$Population
+
+# Conversion to genclone
+genclone_nutral_markers <- as.genclone(neutral_genind)
+#strata(genclone_nutral_markers) <- meta
+genclone_nutral_markers$pop<-as.factor(meta$Population)
+#splitStrata(genclone_nutral_markers) <- ~origin/run
+
+# Conversion to genlight 
+neutral_genlight <- gi2gl(neutral_genind, parallel = FALSE, verbose = NULL)
+ploidy(neutral_genlight) <- 2
+pop(neutral_genlight) <- meta$Population
+
+# Conversion to geno
+gl2geno(neutral_genlight, outfile = "neutral", outpath = getwd(), verbose = NULL)
+
+# Conversion to genpop
+neutral_genpop <- genind2genpop(neutral_genind)
+
+
+#better way to make allllll the objects
+#require(strataG)
+#snowcrab <- genomic_converter(
+#                   data = "populations.snps.vcf", strata = "snowcrab.strata.tsv",
+#                   output = c("genlight", "genepop", "gtypes"))
+```
+
+summary stats
+```{r}
+#alleles per locus
+table(neutral_genind$loc.fac)
+
+#samples per site
+summary(neutral_genind$pop)
+
+#private alleles per site across all loci
+#private_alleles(neutral_genind) %>% apply(MARGIN = 1, FUN = sum)
+
+#mean allelic richness per site across all loci
+allelic.richness(genind2hierfstat(neutral_genind))$Ar %>%
+  apply(MARGIN = 2, FUN = mean) %>% 
+  round(digits = 3)
+
+#heterozygosity per site
+basic_neutral = basic.stats(neutral_genind, diploid = TRUE)
+
+#Mean observed heterozygosity per site
+Ho_neutral = apply(basic_neutral$Ho, MARGIN = 2, FUN = mean, na.rm = TRUE) %>%
+  round(digits = 2)
+Ho_neutral
+
+# Mean expected heterozygosity per site
+He_neutral = apply(basic_neutral$Hs, MARGIN = 2, FUN = mean, na.rm = TRUE) %>%
+  round(digits = 2)
+He_neutral
+
+Het_neutral_df = data.frame(Site = names(Ho_neutral), Ho = Ho_neutral, He = He_neutral) %>%
+  melt(id.vars = "Site")
+
+# Custom theme for ggplot2
+custom_theme = theme(
+  axis.text.x = element_text(size = 10, angle = 90, vjust = 0.5, face = "bold"),
+  axis.text.y = element_text(size = 10),
+  axis.title.y = element_text(size = 12),
+  axis.title.x = element_blank(),
+  axis.line.y = element_line(size = 0.5),
+  legend.title = element_blank(),
+  legend.text = element_text(size = 12),
+  panel.grid = element_blank(),
+  panel.background = element_blank(),
+  plot.title = element_text(hjust = 0.5, size = 15, face="bold")
+  )
+
+# Italic label
+hetlab.o = expression(italic("H")[o])
+hetlab.e = expression(italic("H")[e])
+
+ggplot(data = Het_neutral_df, aes(x = Site, y = value, fill = variable))+
+  geom_bar(stat = "identity", position = position_dodge(width = 0.6), colour = "black")+
+  scale_y_continuous(expand = c(0,0), limits = c(0,0.50))+
+  scale_fill_manual(values = c("royalblue", "#bdbdbd"), labels = c(hetlab.o, hetlab.e))+
+  ylab("Heterozygosity")+
+  ggtitle("neutral loci")+
+  custom_theme
+
+#mean FIS per site (as oppose to FIS per individual)
+apply(basic_neutral$Fis, MARGIN = 2, FUN = mean, na.rm = TRUE) %>%
+  round(digits = 3)
+
+#pairwise FST (Weir & Cockerham 1984)
+neutral_fst = genet.dist(neutral_genind, method = "WC84") %>% round(digits = 3)
+neutral_fst
+
+lab_order = c("TRIR","TILR","WILR","NESR","SILR","YAQR","SIUR","UMPR","NUMP","SUMP","COOR","COQR","SIXR","ELKR","ROGR","CHER","KLAR", "TRAR")
+
+# Change order of rows and cols
+fst.mat = as.matrix(neutral_fst)
+fst.mat1 = fst.mat[lab_order, ]
+fst.mat2 = fst.mat1[, lab_order]
+
+# Create a data.frame
+ind = which(upper.tri(fst.mat2), arr.ind = TRUE)
+fst.df = data.frame(Site1 = dimnames(fst.mat2)[[2]][ind[,2]],
+                    Site2 = dimnames(fst.mat2)[[1]][ind[,1]],
+                    Fst = fst.mat2[ ind ])
+
+# Keep the order of the levels in the data.frame for plotting 
+fst.df$Site1 = factor(fst.df$Site1, levels = unique(fst.df$Site1))
+fst.df$Site2 = factor(fst.df$Site2, levels = unique(fst.df$Site2))
+
+# Convert minus values to zero
+fst.df$Fst[fst.df$Fst < 0] = 0
+
+# Print data.frame summary
+fst.df %>% str
+
+# Fst italic label
+fst.label = expression(italic("F")[ST])
+
+# Extract middle Fst value for gradient argument
+mid = max(fst.df$Fst) / 2
+
+# Plot heatmap
+ggplot(data = fst.df, aes(x = Site1, y = Site2, fill = Fst))+
+  geom_tile(colour = "black")+
+  geom_text(aes(label = Fst), color="black", size = 3)+
+  scale_fill_gradient2(low = "blue", mid = "pink", high = "red", midpoint = mid, name = fst.label, limits = c(0, max(fst.df$Fst)), breaks = c(0, 0.05, 0.10, 0.15))+
+  scale_x_discrete(expand = c(0,0))+
+  scale_y_discrete(expand = c(0,0), position = "right")+
+  theme(axis.text = element_text(colour = "black", size = 10, face = "bold"),
+        axis.title = element_blank(),
+        panel.grid = element_blank(),
+        panel.background = element_blank(),
+        legend.position = "right",
+        legend.title = element_text(size = 14, face = "bold"),
+        legend.text = element_text(size = 10)
+        )
+```
+
+individual level PCA (missing data filled in with mean genotype)
+```{r}
+# Replace missing data with the mean allele frequencies
+x = tab(neutral_genind, NA.method = "mean")
+
+# Perform PCA
+pca1 = dudi.pca(x, scannf = FALSE, scale = FALSE, nf = 3)
+
+# Analyse how much percent of genetic variance is explained by each axis
+percent = pca1$eig/sum(pca1$eig)*100
+barplot(percent, ylab = "Genetic variance explained by eigenvectors (%)", ylim = c(0,12),
+        names.arg = round(percent, 1))
+
+# Create a data.frame containing individual coordinates
+ind_coords = as.data.frame(pca1$li)
+
+# Rename columns of dataframe
+colnames(ind_coords) = c("Axis1","Axis2","Axis3")
+
+# Add a column containing individuals
+ind_coords$Ind = indNames(neutral_genind)
+
+# Add a column with the site IDs
+ind_coords$Site = neutral_genind$pop
+
+# Calculate centroid (average) position for each population
+centroid = aggregate(cbind(Axis1, Axis2, Axis3) ~ Site, data = ind_coords, FUN = mean)
+
+# Add centroid coordinates to ind_coords dataframe
+ind_coords = left_join(ind_coords, centroid, by = "Site", suffix = c("",".cen"))
+
+# Define colour palette
+#cols = brewer.pal(nPop(neutral_genind), "Set1")
+
+# Custom x and y labels
+xlab = paste("Axis 1 (", format(round(percent[1], 1), nsmall=1)," %)", sep="")
+ylab = paste("Axis 2 (", format(round(percent[2], 1), nsmall=1)," %)", sep="")
+
+# Custom theme for ggplot2
+ggtheme = theme(axis.text.y = element_text(colour="black", size=12),
+                axis.text.x = element_text(colour="black", size=12),
+                axis.title = element_text(colour="black", size=12),
+                panel.border = element_rect(colour="black", fill=NA, size=1),
+                panel.background = element_blank(),
+                plot.title = element_text(hjust=0.5, size=15) 
+)
+
+# Scatter plot axis 1 vs. 2
+ggplot(data = ind_coords, aes(x = Axis1, y = Axis2))+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  # spider segments
+  geom_segment(aes(xend = Axis1.cen, yend = Axis2.cen, colour = Site), show.legend = FALSE)+
+  # points
+  geom_point(aes(fill = Site), shape = 21, size = 3, show.legend = FALSE)+
+  # centroids
+  geom_label(data = centroid, aes(label = Site, fill = Site), size = 4, show.legend = FALSE)+
+  # colouring
+  #scale_fill_manual(values = cols)+
+  #scale_colour_manual(values = cols)+
+  # custom labels
+  labs(x = xlab, y = ylab)+
+  ggtitle("neutral PCA")+
+  # custom theme
+  ggtheme
+```
+
+population level PCA
+```{r}
+# Replace missing data with the mean allele frequencies
+x = tab(neutral_genpop)
+
+# Perform PCA
+pca2 = dudi.pca(x, scannf = FALSE, scale = FALSE, nf = 3)
+
+# Analyse how much percent of genetic variance is explained by each axis
+percent = pca2$eig/sum(pca2$eig)*100
+barplot(percent, ylab = "Genetic variance explained by eigenvectors (%)", ylim = c(0,12),
+        names.arg = round(percent, 1))
+
+pop_pcs <- pca2$li
+
+#create column of sample IDs from rownames##
+pop_pcs %<>%
+  rownames_to_column(var = "pop") 
+
+ggplot(pop_pcs)+
+  geom_point(aes(Axis1, Axis2, color = pop), alpha = 0.7, size = 5.0)+
+  geom_text_repel(aes(x=Axis1, y=Axis2, label = pop), nudge_x = 0.015, nudge_y = 0.015, size = 4, alpha = 0.8, force = 6, max.overlaps = 15, min.segment.length = 0.8, segment.colour = "darkgrey", segment.size = 1) +
+  xlab("PC1 97.3%")+
+  ylab("PC2 16.3%")
+```
+
+DAPC
+```{r}
+#choosing k=4 based on below stuff
+dapc <- dapc(neutral_genlight, n.pca = 18, n.da = 2)
+
+#scatter(dapc, col = cols, cex = 2, legend = TRUE, clabel = F, posi.leg = "bottomleft", scree.pca = TRUE,posi.pca = "topleft", cleg = 0.75)
+
+compoplot(dapc)
+
+dapc.results <- as.data.frame(dapc$posterior)
+dapc.results$pop <- pop(neutral_genlight)
+dapc.results$indNames <- rownames(dapc.results)
+
+dapc.results <- pivot_longer(dapc.results, -c(pop, indNames))
+
+colnames(dapc.results) <- c("Original_Pop","Sample","Assigned_Pop","Posterior_membership_probability")
+
+p <- ggplot(dapc.results, aes(x=Sample, y=Posterior_membership_probability, fill=Assigned_Pop))+ 
+  geom_bar(stat='identity') +
+  #scale_fill_manual(values = cols) +
+  facet_grid(~Original_Pop, scales = "free") +
+  theme(axis.text.x=element_blank(),axis.ticks.x=element_blank())
+p
+```
+
+```{r}
+neutral_df <- as.data.frame(neutral_matrix)
+
+delim_gtypes <- neutral_df[, ] %>%
+  mutate_all(funs(case_when(. == "AA" ~ "A/A",
+                            . == "AT" ~ "A/T", 
+                            . == "AC" ~ "A/C", 
+                            . == "AG" ~ "A/G", 
+                            . == "TT" ~ "T/T", 
+                            . == "TA" ~ "T/A", 
+                            . == "TC" ~ "T/C", 
+                            . == "TG" ~ "T/G",
+                            . == "CC" ~ "C/C", 
+                            . == "CA" ~ "C/A", 
+                            . == "CT" ~ "C/T", 
+                            . == "CG" ~ "C/G", 
+                            . == "GG" ~ "G/G", 
+                            . == "GA" ~ "G/A", 
+                            . == "GT" ~ "G/T", 
+                            . == "GC" ~ "G/C", 
+                            . == "--" ~ "-/-", 
+                            . == "A-" ~ "A/-", 
+                            . == "T-" ~ "T/-", 
+                            . == "C-" ~ "C/-", 
+                            . == "G-" ~ "G/-", 
+                            . == "-A" ~ "-/A",
+                            . == "-T" ~ "-/T", 
+                            . == "-C" ~ "-/C", 
+                            . == "-G" ~ "-/G", 
+                            . == "00" ~ "0/0", 
+                            . == "0" ~ "0/0")))
+
+
+vrtnames<-c(colnames(delim_gtypes))
+
+##split genotypes into 2 alleles
+data<-as.data.frame(cSplit(delim_gtypes, splitCols = vrtnames, sep = "/", type.convert = FALSE))
+
+coancestrylbls<-data.frame(c(genos_all$sample))
+colnames(coancestrylbls)<-c("Ind")
+
+rownames(data)<-as.character(coancestrylbls$Ind)
+
+##replace nucleotides with numeric values
+##A = 1; T = 2; C = 3; G = 4; - = 9 ###
+data %<>%
+  mutate_all(funs(case_when(. == "A" ~ 1,
+                            . == "T" ~ 2,
+                            . == "C" ~ 3,
+                            . == "G" ~ 4, 
+                            . == "-" ~ 9,
+                            . == "0" ~ 0,)))
+
+
+pops <- unique(meta$Population)
+sample_sites <- meta$Population
+
+N <- unlist(lapply(pops,function(x){length(which(sample_sites==x))}))
+names(N) <- pops
+
+par(mar=c(4,4,2,0.5))
+pcaS <- prcomp(data,center=T)
+plot(pcaS$sdev^2 / sum(pcaS$sdev^2), xlab="PC",
+     ylab="Fraction Variation Explained", main="Scree plot")
+
+perc <- round(100*(pcaS$sdev^2 / sum(pcaS$sdev^2))[1:10],2)
+names(perc) <- apply(array(seq(1,10,1)), 1, function(x){paste0("PC", x)})
+perc 
+
+sites <- meta[c("Population","lat","lon")]
+
+unique(sites$Population)
+
+#data that needs adding to sites
+sites$lat[sites$Population == "TRIR"] <- 40.680109
+sites$lon[sites$Population == "TRIR"] <- -122.882794
+
+sites$lat[sites$Population == "KLAR"] <- 42.2234
+sites$lon[sites$Population == "KLAR"] <- -121.7776
+
+sites$lat[sites$Population == "CHER"] <- 42.2151096
+sites$lon[sites$Population == "CHER"] <- -123.8967436
+
+sites$lat[sites$Population == "ELKR"] <- 42.71667
+sites$lon[sites$Population == "ELKR"] <- -124.20528
+
+sites$lat[sites$Population == "UMPR"] <- 43.2681707
+sites$lon[sites$Population == "UMPR"] <- -123.4459121
+
+sites$lat[sites$Population == "SUMP"] <- 42.9396
+sites$lon[sites$Population == "SUMP"] <- -123.26761
+
+sites$lat[sites$Population == "COQR"] <- 43.1237199
+sites$lon[sites$Population == "COQR"] <- -124.4301156
+
+sites$lat[sites$Population == "ROGR"] <- 42.434953
+sites$lon[sites$Population == "ROGR"] <- -123.170053
+
+sites2 <- sites %>%
+  group_by(Population) %>%
+  summarise(
+    lat = mean(lat),
+    lon = mean(lon)
+  )
+
+sites_n <- as.data.frame(table(sites$Population)) 
+sites_n %<>% rename("Population" = "Var1")
+sites_merge <- merge(sites_n,sites2,by="Population") 
+
+rownames(sites2)<-sites2$Population
+sites2 <- subset(sites2, select = -Population)
+
+snmf <- LEA::snmf("neutral.geno", K=1:18, ploidy=2, entropy=T, 
+                   alpha=100, project="new")
+
+plot(snmf, col = "blue4", cex = 1.4, pch = 19)
+K=6
+
+qmatrix = LEA::Q(snmf, K = K)
+
+#initialize array for ancestry proportions:
+qpop <- matrix(NA,nrow=length(pops),ncol=K) 
+
+#intialize array for coordinates:
+coord.pop <- matrix(NA,nrow=length(pops),ncol=2) 
+n = 1
+
+for (i in sort(unique(pops)))
+  {
+  qpop[n,] = apply(qmatrix[pops == i,], 2, mean)
+  coord.pop[n,] = apply(sites2[pops == i,], 2, mean)
+  n=n+1
+}
+
+colnames(coord.pop) <- c("lat", "lon")
+pie_data <- cbind(sites_merge,qpop)
+
+p1 <- ggplot() + 
+  geom_sf(data = oregon, size = 1.5, color = "grey50", fill = "#777")+
+  geom_sf(data = rivers_filtered, aes(color = Name), lwd = 1.2)+
+  geom_sf(data = COOR, aes(color = ID), lwd = 1.2)+
+  geom_sf(data = SILR, aes(color = ID), lwd = 1.2)+
+  geom_sf(data = SIUR, aes(color = ID), lwd = 1.2)+
+  geom_sf(data = SIXR, aes(color = ID), lwd = 1.2)+
+  scale_color_manual(values = hcl.colors(23, "Zissou1", rev = FALSE)) +
+  coord_sf(xlim=c(-125, -121.7), ylim = c(40.9,46.2991),datum = sf::st_crs(4326))+
+  scale_x_continuous(breaks = seq(-125, -121.7, by = 1), name = "Longitude (°W)")+
+  scale_y_continuous(name = "Latitude (°N)")+
+  geom_scatterpie(data = pie_data,aes(x=lon, y=lat, group=Population, r=.1), cols=colnames(pie_data)[5:10],color=NA)+
+  scale_fill_manual(values = c("orange","violet","lightgreen","yellow","purple","lightblue"))+
+  theme(legend.justification = "top")+
+  annotation_scale(location = "bl", width_hint = 0.5) +
+  annotation_north_arrow(
+    location = "bl",
+    pad_x = unit(0, "in"),
+    pad_y = unit(0.3, "in"),
+    style = north_arrow_fancy_orienteering)+
+    theme_bw()
+
+barplot(t(qmatrix), border = NA, space = 0, ylab = "Individuals", xlab = "Admixture coefficients",col = c("orange","violet","lightgreen","yellow","purple", "lightblue"), horiz=T)
+
+for (i in 1:length(pops)){
+  axis(4, at=median(which(sample_sites==pops[i])), labels=pops[i])}
+
+p2 <- recordPlot()
+
+plot_grid(p2, p1, labels = 'AUTO',ncol = 2,rel_widths =c(1,5))
+
+
+#plot(coord.pop, xlab = "Longitude", ylab = "Latitude", type = "n")
+#map(add = T, col = "grey90", fill = TRUE)
+
+#for (i in 1:length(pops)){
+#  add.pie(z = qpop[i,], x = coord.pop[i,1], y = coord.pop[i,2], labels = "",
+#  col = c("orange","violet","lightgreen","yellow","purple","lightblue"))}
+```
+
+neutral_genpop
+```{r}
+tree <- aboot(neutral_genpop, tree = "upgma", distance = bitwise.dist, sample = 100, showtree = F, cutoff = 50, quiet = T)
+
+cols <- brewer.pal(n = nPop(neutral_genpop), name = "Dark2")
+
+plot.phylo(tree, cex = 0.8, font = 2, adj = 0, tip.color =  cols[pop(neutral_genlight)])
+nodelabels(tree$node.label, adj = c(1.3, -0.5), frame = "n", cex = 0.8,font = 3, xpd = TRUE)
+#legend(35,10,c("CA","OR","WA"),cols, border = FALSE, bty = "n")
+#legend('topleft', legend = c("CA","OR","WA"), fill = cols, border = FALSE, bty = "n", cex = 2)
+axis(side = 1)
+title(xlab = "Genetic distance (proportion of loci that are different)")
+
+
+dist <- bitwise.dist(neutral_genpop)
+msn <- poppr.msn(neutral_genpop, dist, showplot = FALSE, include.ties = T)
+
+node.size <- rep(2, times = nInd(neutral_genpop))
+#names(node.size) <- indNames(neutral_genlight)
+vertex.attributes(msn$graph)$size <- node.size
+
+set.seed(9)
+plot_poppr_msn(neutral_genpop, msn , palette = brewer.pal(n = nPop(neutral_genpop), name = "Dark2"), gadj = 70)
+```
+
+
