@@ -25,17 +25,31 @@ library(dartR)
 
 load and or read in the data
 ```{r}
-load("Ots_coastal_2024_298_markers.R")
-write.csv(combined_1[, 1:17], file = "Ots_coastal_2024_meta.csv")
+#note kevin made this data before KO went through to update some missing info and before we had established the final sampling hierarchy. Will keep it in code and git hub fr a record of how the data changed but this is not the data that should be used in analysis. The data that should be used is based off this data but manually edited in excel for accuracy and is read in below.
 
-genos_all <- combined_1[c(-2:-17)]
-write.csv(colnames(genos_all), file = "Ots_coastal_2024_loci.csv")
+#here is a record of things were were edited in the data for accuracy for record keeping:
+  #all samples from Iron gate are fall run
+
+#load("Ots_coastal_2024_298_markers.R")
+#write.csv(combined_1[, 1:17], file = "Ots_coastal_2024_meta_old.csv")
+#genos_all <- combined_1[c(-2:-17)]
+#write.csv(colnames(genos_all), file = "Ots_coastal_2024_loci_names.csv")
+#write.csv(genos_all, file = "Ots_coastal_2024_loci_data.csv")
+
+meta<-read.csv("Ots_coastal_2024_meta.csv", header = TRUE)
+genos_all <- read.csv("Ots_coastal_2024_loci_data.csv", header = TRUE)
 
 colnames(genos_all)
-meta<-read.csv("Ots_coastal_2024_meta.csv", header = TRUE)
 
 ##read marker information for Ots GT-seq panel
-ots_panel_info<-read_excel("Ots GT-seq panel info.xlsx",sheet = 2)
+ots_panel_info<-read_excel("loci_details.xlsx")
+```
+
+```{r}
+#COLORS!! because colors are fun
+hcl.colors(18, "Zissou1", rev = FALSE)
+
+group.colors <- c(CHER = "#3B99B1", COOR = "#36A4AB", COQR ="#45ADA3", ELKR = "#5FB49B", KLAR = "#7CBA96", NESR ="#97BE95", NUMP = "#ADC491", ROGR= "#C4C88B", SILR= "#EACB2B", SIUR= "#EABC22", SIXR= "#E9AE1D", SUMP= "#E89F16", TILR= "#E78F0A", TRAR= "#E77E00", TRIR= "#EA6900", UMPR= "#EE4E00", WILR= "#F5191C", YAQR= "#F5191C")
 ```
 
 
@@ -45,18 +59,20 @@ meta<-meta[order(match(meta$sample, genos_all$sample)), ]
 identical(genos_all$sample, meta$sample)
 
 ##subset panel info to those markers in the SFGL panel
-ots_SFGL_panel_info<-ots_panel_info[ots_panel_info$Assay %in% colnames(genos_all), ]
+#ots_SFGL_panel_info<-ots_panel_info[ots_panel_info$Assay %in% colnames(genos_all), ]
 ```
 
 PCA
 ##look at just the 31 Ots run timing markers that made it through filtering 
 subset to run timing markers
 ```{r}
-rt_markers<-subset(ots_SFGL_panel_info, ots_SFGL_panel_info$PresumedType == "runtiming")
-run_timing<-genos_all[, c(1, which(colnames(genos_all) %in% rt_markers$Assay))]
+rt_markers<-subset(ots_panel_info, ots_panel_info$`Presumed Type` == "Adaptive Migration Markers")
+run_timing<-genos_all[, c(1, which(colnames(genos_all) %in% rt_markers$marker))]
 
 rt_matrix <- as.matrix(run_timing[,c(2:(ncol(run_timing)))]) 
-row.names(rt_matrix) <- run_timing$sample
+row.names(rt_matrix) <- genos_all$sample
+
+colnames(rt_matrix) <- gsub("\\.", "_", colnames(rt_matrix))
 
 genind_run_timing <- df2genind(rt_matrix, sep ="", ploidy=2,NA.char = "00")
 
@@ -104,10 +120,11 @@ snp_pcs$Population <- as.factor(snp_pcs$Population)
 
 ##plot PCA with population
 jitter <- position_jitter(width = 0.5, height = 0.5)
-rt_PCA<-ggplot(snp_pcs)+
-  geom_point(aes(Axis1, Axis2, color = Population, shape = run), position = jitter, alpha = 0.5) +
+rt_PCA<-ggplot(snp_pcs,aes(Axis1, Axis2, color = Population, shape = run))+
+  geom_point(position = jitter, alpha = 0.5) +
   theme_classic()+
-  ggtitle("RT markers")
+  ggtitle("RT markers")+
+  scale_color_manual(values=group.colors)
 
 ##plot PCA with heterozygosity 
 het_PCA<-ggplot(snp_pcs)+
@@ -119,11 +136,20 @@ het_PCA<-ggplot(snp_pcs)+
 together<-plot_grid(rt_PCA, het_PCA, ncol = 1, labels = c("a)", "b)"), label_size = 18)
 together
 
-##PCA sex
+##PCA run
 jitter <- position_jitter(width = 0.4, height = 0.4)
 ggplot(snp_pcs)+
-  geom_point(aes(Axis1, Axis2, color = sex), position = jitter, alpha = 0.5) +
+  geom_point(aes(Axis1, Axis2, color = run), position = jitter, alpha = 0.5) +
   scale_color_manual(values = c("#69b3a2", "#404080","orange")) +
+  xlab("")+
+  ylab("")+
+  theme_classic()
+
+##PCA HOR/NOR
+jitter <- position_jitter(width = 0.4, height = 0.4)
+ggplot(snp_pcs)+
+  geom_point(aes(Axis1, Axis2, color = origin), position = jitter, alpha = 0.5) +
+  scale_color_manual(values = c("orange","#404080")) +
   xlab("")+
   ylab("")+
   theme_classic()
@@ -132,9 +158,9 @@ ggplot(snp_pcs)+
 
 look at 218 markers identified as Neutral
 ```{r}
-nm<-which(ots_SFGL_panel_info$PresumedType == "Neutral")
-neutral_marker_list<-ots_SFGL_panel_info[nm, ]
-neutral_matrix<-as.matrix(genos_all[, colnames(genos_all) %in% neutral_marker_list$Assay])
+nm<-which(ots_panel_info$`Presumed Type` == "Neutral")
+neutral_marker_list<-ots_panel_info[nm, ]
+neutral_matrix<-as.matrix(genos_all[, colnames(genos_all) %in% neutral_marker_list$marker])
 rownames(neutral_matrix)<-genos_all$sample
 
 ##remove "dots" from column names##
@@ -180,7 +206,8 @@ snp_pcs<-cbind(snp_pcs, hets)
 neutral_PCA<-ggplot(snp_pcs)+
   geom_point(aes(Axis1, Axis2, color = Population), alpha = 0.5) +
   theme_classic()+
-  ggtitle("Neutral markers")
+  ggtitle("Neutral markers")+
+  scale_color_manual(values=group.colors)
 
 
 ##plot PCA with heterozygosity 
@@ -195,21 +222,31 @@ together<-plot_grid(neutral_PCA, het_PCA, ncol = 1, labels = c("a)", "b)"), labe
 together
 
 
-##PCA sex 
+##PCA run 
 jitter <- position_jitter(width = 0.4, height = 0.4)
 ggplot(snp_pcs)+
-  geom_point(aes(Axis1, Axis2, color = sex), position = jitter, alpha = 0.5) +
+  geom_point(aes(Axis1, Axis2, color = run), position = jitter, alpha = 0.5) +
   scale_color_manual(values = c("#69b3a2", "#404080", "orange")) +
   xlab("")+
   ylab("")+
   theme_classic() 
 
+##PCA HOR/NOR
+jitter <- position_jitter(width = 0.4, height = 0.4)
+ggplot(snp_pcs)+
+  geom_point(aes(Axis1, Axis2, color = origin), position = jitter, alpha = 0.5) +
+  scale_color_manual(values = c("orange","#404080")) +
+  xlab("")+
+  ylab("")+
+  theme_classic()
 ```
 
-look at all non run timing/sex markers##
+look at adaptive markers##
 ```{r}
-non_run_timing<-genos_all[, c(which(!colnames(genos_all) %in% rt_markers$Assay))]
-non_run_timing_matrix<-as.matrix(non_run_timing[, c(2:(ncol(non_run_timing)))])
+non_run_timing<-which(ots_panel_info$`Presumed Type` == "Adaptive Test Markers")
+
+non_run_timing_list<-ots_panel_info[non_run_timing, ]
+non_run_timing_matrix<-as.matrix(genos_all[, colnames(genos_all) %in% non_run_timing_list$marker])
 rownames(non_run_timing_matrix)<-genos_all$sample
 
 ##remove "dots" from column names##
@@ -242,33 +279,47 @@ snp_pcs<-cbind(snp_pcs, meta)
 #snp_pcs %<>%
 #  relocate(sample, IndividualName, WILDorHAT., Marks, Gender)
 
+##add proportion heterozygous data
+identical(snp_pcs$sample, rownames(hets))
+snp_pcs<-cbind(snp_pcs, hets)
+
 non_run_timing_PCA<-ggplot(snp_pcs)+
-  geom_point(aes(Axis1, Axis2, color = stream), alpha = 0.5) +
+  geom_point(aes(Axis1, Axis2, color = Population), alpha = 0.5) +
   theme_classic()+
-  ggtitle("non_run_timing markers")
+  ggtitle("ad markers")+
+  scale_color_manual(values=group.colors)
 
-##PCA sex 
-non_run_timing_sex_PCA<-ggplot(snp_pcs)+
-  geom_point(aes(Axis1, Axis2, color = sex), position = jitter, alpha = 0.5) +
-  theme_classic()+
-  ggtitle("non_run_timing_sex markers")
+##plot PCA with heterozygosity 
+het_PCA<-ggplot(snp_pcs)+
+  geom_point(aes(Axis1, Axis2, color = prop_het), position = jitter, alpha = 0.5) +
+  scale_color_gradient(name = "Proportion of heterozygous", limits = c(0, 1), breaks = c(0, 0.5, 1), low = "darkblue", high = "red") +
+  theme_classic() 
 
-##use package cowplot to put figures on single page##
-together<-plot_grid(non_run_timing_PCA, non_run_timing_sex_PCA, ncol = 1, labels = c("a)", "b)"), label_size = 18)
-together
+
+##PCA run 
+jitter <- position_jitter(width = 0.4, height = 0.4)
+ggplot(snp_pcs)+
+  geom_point(aes(Axis1, Axis2, color = run), position = jitter, alpha = 0.5) +
+  scale_color_manual(values = c("#69b3a2", "#404080", "orange")) +
+  xlab("")+
+  ylab("")+
+  theme_classic() 
+
+##PCA HOR/NOR
+jitter <- position_jitter(width = 0.4, height = 0.4)
+ggplot(snp_pcs)+
+  geom_point(aes(Axis1, Axis2, color = origin), position = jitter, alpha = 0.5) +
+  scale_color_manual(values = c("orange","#404080")) +
+  xlab("")+
+  ylab("")+
+  theme_classic()
 ```
 
 quantify FST across run timing and non-run timing markers (rivers)
 ```{r}
 ##with run timing markers##
-##add spring fall classifications as population identifiers to the genind object
-nm_df<-as.data.frame(rownames(genind_run_timing$tab))
-colnames(nm_df)<-"sample"
-identical(nm_df$sample, meta$sample)
-nm_df<-cbind(nm_df, meta$Population)
-
 ##add Population classification as population identifier to genind object of run timing markers
-genind_run_timing$pop<-as.factor(nm_df$`meta$Population`)
+pop(genind_run_timing) <- meta$Population
 run_timing_loci<-genind2loci(genind_run_timing) 
 
 ##estimate FST between Population at run timing markers
@@ -284,8 +335,10 @@ diff_plot_run_timing<-ggplot(differentiation_run_timing, aes(x = Fst)) +
   theme_classic()+
   ggtitle("run timing markers (Population)")
 
+
+
 #removing sex marker because it is causing issues with fst line below
-non_run_timing_matrix <- non_run_timing_matrix[, setdiff(colnames(non_run_timing_matrix), "Ots_SEXY3-1")]
+non_run_timing_matrix<- non_run_timing_matrix[, colnames(non_run_timing_matrix) != 'Ots_SEXY3_1']
 
 ##remove "dots" from column names##
 colnames(non_run_timing_matrix) <- gsub("\\.", "_", colnames(non_run_timing_matrix))
@@ -318,14 +371,8 @@ together
 quantify FST across run timing and non-run timing markers (spring fall)
 ```{r}
 ##with run timing markers##
-##add spring fall classifications as population identifiers to the genind object
-nm_df<-as.data.frame(rownames(genind_run_timing$tab))
-colnames(nm_df)<-"sample"
-identical(nm_df$sample, meta$sample)
-nm_df<-cbind(nm_df, meta$run)
-
 ##add run classification as population identifier to genind object of run timing markers
-genind_run_timing$pop<-as.factor(nm_df$`meta$run`)
+genind_run_timing$pop<-as.factor(meta$run)
 run_timing_loci<-genind2loci(genind_run_timing) 
 
 ##estimate FST between run at run timing markers
@@ -342,7 +389,7 @@ diff_plot_run_timing<-ggplot(differentiation_run_timing, aes(x = Fst)) +
   ggtitle("run timing markers (run)")
 
 #removing sex marker because it is causing issues with fst line below
-non_run_timing_matrix <- non_run_timing_matrix[, setdiff(colnames(non_run_timing_matrix), "Ots_SEXY3-1")]
+non_run_timing_matrix <- non_run_timing_matrix[, setdiff(colnames(non_run_timing_matrix), "Ots_SEXY3_1")]
 
 ##remove "dots" from column names##
 colnames(non_run_timing_matrix) <- gsub("\\.", "_", colnames(non_run_timing_matrix))
@@ -350,7 +397,7 @@ colnames(non_run_timing_matrix) <- gsub("\\.", "_", colnames(non_run_timing_matr
 non_run_timing_genind <- df2genind(non_run_timing_matrix, sep ="", ploidy=2,NA.char = "00")
 
 ##add run classification as population identifier to genind object of non run timing markers
-non_run_timing_genind$pop<-as.factor(nm_df$`meta$run`)
+non_run_timing_genind$pop<-as.factor(rt_df$`meta$run`)
 non_run_timing_loci<-genind2loci(non_run_timing_genind) 
 
 ##estimate FST between run at non run timing markers

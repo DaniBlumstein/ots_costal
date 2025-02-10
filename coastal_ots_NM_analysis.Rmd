@@ -24,6 +24,7 @@ library(cowplot)
 library(gridGraphics)
 library(ggrepel)
 library(magrittr)
+library(paletteer)
 
 if (!require("remotes")) install.packages("remotes")
 remotes::install_github("hhwagner1/LandGenCourse")
@@ -42,12 +43,55 @@ if(!requireNamespace("LEA", quietly = TRUE)) {
 
 library(LEA)
 library(scatterpie)
+library(ape)
+library(phangorn)
+library(ggnewscale)
+```
+
+read in the data
+```{r}
+meta<-read.csv("Ots_coastal_2024_meta.csv", header = TRUE)
+genos_all <- read.csv("Ots_coastal_2024_loci_data.csv", header = TRUE)
+
+##read marker information for Ots GT-seq panel
+ots_panel_info<-read_excel("loci_details.xlsx")
 ```
 
 ```{r}
-#here are the two options, choosing neutral for now
-non_run_timing_genind
+#COLORS!! because colors are fun
+hcl.colors(18, "Zissou1", rev = FALSE)
+
+group.colors <- c(CHER = "#3B99B1", COOR = "#36A4AB", COQR ="#45ADA3", ELKR = "#5FB49B", KLAR = "#7CBA96", NESR ="#97BE95", NUMP = "#ADC491", ROGR= "#C4C88B", SILR= "#EACB2B", SIUR= "#EABC22", SIXR= "#E9AE1D", SUMP= "#E89F16", TILR= "#E78F0A", TRAR= "#E77E00", TRIR= "#EA6900", UMPR= "#EE4E00", WILR= "#F5191C", YAQR= "#F5191C")
+
+group.colors2 <- c("Chetco River" = "#3B99B1", "Coos River" = "#36A4AB", "Coquille River" ="#45ADA3", "Elk River" = "#5FB49B", "Klamath River" = "#7CBA96", "Nestucca River" ="#97BE95", "Little Nestucca River" = "#97BE95", "Rogue River"= "#C4C88B", "Siletz River"= "#EACB2B", "Siuslaw River"= "#EABC22", "Sixes River"= "#E9AE1D", "South Umpqua River"= "#E89F16", "Tillamook River"= "#E78F0A", "Trask River"= "#E77E00", "Trinity River"= "#EA6900", "North Umpqua River"= "#ADC491", "Umpqua River" = "#EE4E00","Wilson River"= "#F5191C", "Yaquina River"= "#F5191C")
+                  
+```
+
+
+```{r}
+##put dataset and meta in same order##
+meta<-meta[order(match(meta$sample, genos_all$sample)), ]
+identical(genos_all$sample, meta$sample)
+
+##subset panel info to those markers in the SFGL panel
+ots_SFGL_panel_info<-ots_panel_info[ots_panel_info$marker %in% colnames(genos_all), ]
+```
+
+look at 218 markers identified as Neutral
+```{r}
+nm<-which(ots_panel_info$`Presumed Type` == "Neutral")
+neutral_marker_list<-ots_panel_info[nm, ]
+neutral_matrix<-as.matrix(genos_all[, colnames(genos_all) %in% neutral_marker_list$marker])
+rownames(neutral_matrix)<-genos_all$sample
+
+##remove "dots" from column names##
+colnames(neutral_matrix) <- gsub("\\.", "_", colnames(neutral_matrix))
+
+neutral_genind <- df2genind(neutral_matrix, sep ="", ploidy=2,NA.char = "00")
 neutral_genind
+```
+
+```{r}
 pop(neutral_genind) <- meta$Population
 
 # Conversion to genclone
@@ -75,7 +119,7 @@ neutral_genpop <- genind2genpop(neutral_genind)
 #                   output = c("genlight", "genepop", "gtypes"))
 ```
 
-summary stats
+summary stats by pop
 ```{r}
 #alleles per locus
 table(neutral_genind$loc.fac)
@@ -141,7 +185,7 @@ apply(basic_neutral$Fis, MARGIN = 2, FUN = mean, na.rm = TRUE) %>%
 neutral_fst = genet.dist(neutral_genind, method = "WC84") %>% round(digits = 3)
 neutral_fst
 
-lab_order = c("TRIR","TILR","WILR","NESR","SILR","YAQR","SIUR","UMPR","NUMP","SUMP","COOR","COQR","SIXR","ELKR","ROGR","CHER","KLAR", "TRAR")
+lab_order = c("ROGR","NESR","NUMP","SILR","TILR","TRAR","SUMP","COOR","COQR","SIUR","SIXR","UMPR","WILR","YAQR","TRIR","KLAR","CHER")
 
 # Change order of rows and cols
 fst.mat = as.matrix(neutral_fst)
@@ -186,6 +230,7 @@ ggplot(data = fst.df, aes(x = Site1, y = Site2, fill = Fst))+
         legend.text = element_text(size = 10)
         )
 ```
+
 
 individual level PCA (missing data filled in with mean genotype)
 ```{r}
@@ -239,14 +284,14 @@ ggplot(data = ind_coords, aes(x = Axis1, y = Axis2))+
   geom_hline(yintercept = 0)+
   geom_vline(xintercept = 0)+
   # spider segments
-  geom_segment(aes(xend = Axis1.cen, yend = Axis2.cen, colour = Site), show.legend = FALSE)+
+  geom_segment(aes(xend = Axis1.cen, yend = Axis2.cen, color = Site), show.legend = FALSE)+
   # points
   geom_point(aes(fill = Site), shape = 21, size = 3, show.legend = FALSE)+
   # centroids
   geom_label(data = centroid, aes(label = Site, fill = Site), size = 4, show.legend = FALSE)+
   # colouring
-  #scale_fill_manual(values = cols)+
-  #scale_colour_manual(values = cols)+
+  scale_color_manual(values=group.colors)+
+  scale_fill_manual(values=group.colors)+
   # custom labels
   labs(x = xlab, y = ylab)+
   ggtitle("neutral PCA")+
@@ -277,33 +322,11 @@ ggplot(pop_pcs)+
   geom_point(aes(Axis1, Axis2, color = pop), alpha = 0.7, size = 5.0)+
   geom_text_repel(aes(x=Axis1, y=Axis2, label = pop), nudge_x = 0.015, nudge_y = 0.015, size = 4, alpha = 0.8, force = 6, max.overlaps = 15, min.segment.length = 0.8, segment.colour = "darkgrey", segment.size = 1) +
   xlab("PC1 97.3%")+
-  ylab("PC2 16.3%")
+  ylab("PC2 16.3%")+
+  scale_color_manual(values=group.colors)
+  
 ```
 
-DAPC
-```{r}
-#choosing k=4 based on below stuff
-dapc <- dapc(neutral_genlight, n.pca = 18, n.da = 2)
-
-#scatter(dapc, col = cols, cex = 2, legend = TRUE, clabel = F, posi.leg = "bottomleft", scree.pca = TRUE,posi.pca = "topleft", cleg = 0.75)
-
-compoplot(dapc)
-
-dapc.results <- as.data.frame(dapc$posterior)
-dapc.results$pop <- pop(neutral_genlight)
-dapc.results$indNames <- rownames(dapc.results)
-
-dapc.results <- pivot_longer(dapc.results, -c(pop, indNames))
-
-colnames(dapc.results) <- c("Original_Pop","Sample","Assigned_Pop","Posterior_membership_probability")
-
-p <- ggplot(dapc.results, aes(x=Sample, y=Posterior_membership_probability, fill=Assigned_Pop))+ 
-  geom_bar(stat='identity') +
-  #scale_fill_manual(values = cols) +
-  facet_grid(~Original_Pop, scales = "free") +
-  theme(axis.text.x=element_blank(),axis.ticks.x=element_blank())
-p
-```
 
 ```{r}
 neutral_df <- as.data.frame(neutral_matrix)
@@ -359,11 +382,13 @@ data %<>%
                             . == "0" ~ 0,)))
 
 
-pops <- unique(meta$Population)
+pops_order = c("TRAR", "WILR", "TILR", "NESR", "SILR", "YAQR","SIUR", "UMPR", "NUMP", "SUMP","COOR","COQR", "SIXR","ELKR","ROGR","KLAR","CHER", "TRIR")
 sample_sites <- meta$Population
+sorted_sites <- unlist(lapply(pops_order, function(x) sample_sites[sample_sites == x]))
 
-N <- unlist(lapply(pops,function(x){length(which(sample_sites==x))}))
-names(N) <- pops
+
+N <- unlist(lapply(pops_order,function(x){length(which(sample_sites==x))}))
+names(N) <- pops_order
 
 par(mar=c(4,4,2,0.5))
 pcaS <- prcomp(data,center=T)
@@ -375,8 +400,6 @@ names(perc) <- apply(array(seq(1,10,1)), 1, function(x){paste0("PC", x)})
 perc 
 
 sites <- meta[c("Population","lat","lon")]
-
-unique(sites$Population)
 
 #data that needs adding to sites
 sites$lat[sites$Population == "TRIR"] <- 40.680109
@@ -404,57 +427,87 @@ sites$lat[sites$Population == "ROGR"] <- 42.434953
 sites$lon[sites$Population == "ROGR"] <- -123.170053
 
 sites2 <- sites %>%
-  group_by(Population) %>%
-  summarise(
+  dplyr::group_by(Population) %>%
+  dplyr::summarise(
     lat = mean(lat),
     lon = mean(lon)
   )
 
 sites_n <- as.data.frame(table(sites$Population)) 
-sites_n %<>% rename("Population" = "Var1")
+sites_n %<>% dplyr::rename("Population" = "Var1")
 sites_merge <- merge(sites_n,sites2,by="Population") 
 
-rownames(sites2)<-sites2$Population
+sites2$Population <- factor(sites2$Population, levels = pops_order)
+
+#sort it north to south
+sites2 <- sites2[order(sites2$Population), ]
 sites2 <- subset(sites2, select = -Population)
 
 snmf <- LEA::snmf("neutral.geno", K=1:18, ploidy=2, entropy=T, 
                    alpha=100, project="new")
 
 plot(snmf, col = "blue4", cex = 1.4, pch = 19)
-K=6
 
-qmatrix = LEA::Q(snmf, K = K)
+ce <- cross.entropy(snmf, K = 9)
+
+# select the run with the lowest cross-entropy value
+best <- which.min(ce)
+
+qmatrix = Q(snmf, K = 9, run = best)
+cluster<- apply(qmatrix, 1, which.max)
+
+
+# plot the ancestry coefficients for the best run and K
+par(mar=c(4,4,0.5,0.5))
+barplot(t(qmatrix), col=hcl.colors(9, "Fall", rev = FALSE), 
+        border=NA, space=0, ylab="Rivers", 
+        xlab="Admixture coefficients", horiz = T,)
+
+#Add population labels to the axis:
+for (i in 1:length(pops)){
+  axis(4, at=median(which(sample_sites==pops[i])), labels=pops[i])}
+
+p2 <- recordPlot()
+
+K=9
 
 #initialize array for ancestry proportions:
-qpop <- matrix(NA,nrow=length(pops),ncol=K) 
+qpop <- matrix(NA,nrow=length(pops_order),ncol=K) 
 
+unique(meta$Population)
 #intialize array for coordinates:
-coord.pop <- matrix(NA,nrow=length(pops),ncol=2) 
+coord.pop <- matrix(NA,nrow=length(pops_order),ncol=2) 
 n = 1
 
-for (i in sort(unique(pops)))
+for (i in unique(pops_order))
   {
-  qpop[n,] = apply(qmatrix[pops == i,], 2, mean)
-  coord.pop[n,] = apply(sites2[pops == i,], 2, mean)
+  qpop[n,] = apply(qmatrix[pops_order == i,], 2, mean)
+  coord.pop[n,] = apply(sites2[pops_order == i,], 2, mean)
   n=n+1
 }
 
 colnames(coord.pop) <- c("lat", "lon")
 pie_data <- cbind(sites_merge,qpop)
 
-p1 <- ggplot() + 
-  geom_sf(data = oregon, size = 1.5, color = "grey50", fill = "#777")+
+p1 <- ggplot() +
+  geom_spatraster(data = r2, mapping = aes(fill = USA_elv_msk)) +
+  #geom_sf(data = oregon, size = 1.5, color = "grey50", fill = "#777")+
   geom_sf(data = rivers_filtered, aes(color = Name), lwd = 1.2)+
   geom_sf(data = COOR, aes(color = ID), lwd = 1.2)+
   geom_sf(data = SILR, aes(color = ID), lwd = 1.2)+
   geom_sf(data = SIUR, aes(color = ID), lwd = 1.2)+
   geom_sf(data = SIXR, aes(color = ID), lwd = 1.2)+
-  scale_color_manual(values = hcl.colors(23, "Zissou1", rev = FALSE)) +
-  coord_sf(xlim=c(-125, -121.7), ylim = c(40.9,46.2991),datum = sf::st_crs(4326))+
+  scale_color_manual(values=group.colors2) +
+  scale_fill_gradient(high = "lightgrey", low = "#555",  na.value='transparent') +
+  coord_sf(xlim=c(-125, -121.7), ylim = c(42,46.2991),datum = sf::st_crs(4326))+
   scale_x_continuous(breaks = seq(-125, -121.7, by = 1), name = "Longitude (°W)")+
-  scale_y_continuous(name = "Latitude (°N)")+
-  geom_scatterpie(data = pie_data,aes(x=lon, y=lat, group=Population, r=.1), cols=colnames(pie_data)[5:10],color=NA)+
-  scale_fill_manual(values = c("orange","violet","lightgreen","yellow","purple","lightblue"))+
+  scale_y_continuous(name = "Latitude (°N)") +
+  
+# start a new scale
+  new_scale_fill() +
+
+  geom_scatterpie(data = pie_data,mapping = aes(x=lon, y=lat, group=Population, r=log(Freq+1)/40), cols=colnames(pie_data)[5:13], color = "black")+
+  scale_fill_manual(values = hcl.colors(9, "Fall", rev = FALSE))+
   theme(legend.justification = "top")+
   annotation_scale(location = "bl", width_hint = 0.5) +
   annotation_north_arrow(
@@ -464,12 +517,8 @@ p1 <- ggplot() +
     style = north_arrow_fancy_orienteering)+
     theme_bw()
 
-barplot(t(qmatrix), border = NA, space = 0, ylab = "Individuals", xlab = "Admixture coefficients",col = c("orange","violet","lightgreen","yellow","purple", "lightblue"), horiz=T)
+p1
 
-for (i in 1:length(pops)){
-  axis(4, at=median(which(sample_sites==pops[i])), labels=pops[i])}
-
-p2 <- recordPlot()
 
 plot_grid(p2, p1, labels = 'AUTO',ncol = 2,rel_widths =c(1,5))
 
@@ -482,29 +531,87 @@ plot_grid(p2, p1, labels = 'AUTO',ncol = 2,rel_widths =c(1,5))
 #  col = c("orange","violet","lightgreen","yellow","purple","lightblue"))}
 ```
 
-neutral_genpop
+
+DAPC
 ```{r}
-tree <- aboot(neutral_genpop, tree = "upgma", distance = bitwise.dist, sample = 100, showtree = F, cutoff = 50, quiet = T)
+pca <- glPca(neutral_genlight)
 
-cols <- brewer.pal(n = nPop(neutral_genpop), name = "Dark2")
+#choosing k=9
+dapc <- dapc(neutral_genlight, n.pca = 3, n.da = 2)
 
-plot.phylo(tree, cex = 0.8, font = 2, adj = 0, tip.color =  cols[pop(neutral_genlight)])
-nodelabels(tree$node.label, adj = c(1.3, -0.5), frame = "n", cex = 0.8,font = 3, xpd = TRUE)
-#legend(35,10,c("CA","OR","WA"),cols, border = FALSE, bty = "n")
-#legend('topleft', legend = c("CA","OR","WA"), fill = cols, border = FALSE, bty = "n", cex = 2)
-axis(side = 1)
-title(xlab = "Genetic distance (proportion of loci that are different)")
+scatter(dapc, col = group.colors, cex = 2, legend = TRUE, clabel = F, posi.leg = "bottomleft", scree.pca = TRUE,
+        posi.pca = "topleft", cleg = 0.75)
 
+#compoplot(dapc)
 
-dist <- bitwise.dist(neutral_genpop)
-msn <- poppr.msn(neutral_genpop, dist, showplot = FALSE, include.ties = T)
+dapc.results <- as.data.frame(dapc$posterior)
+dapc.results$pop <- pop(neutral_genlight)
+dapc.results$indNames <- rownames(dapc.results)
 
-node.size <- rep(2, times = nInd(neutral_genpop))
-#names(node.size) <- indNames(neutral_genlight)
-vertex.attributes(msn$graph)$size <- node.size
+dapc.results <- pivot_longer(dapc.results, -c(pop, indNames))
 
-set.seed(9)
-plot_poppr_msn(neutral_genpop, msn , palette = brewer.pal(n = nPop(neutral_genpop), name = "Dark2"), gadj = 70)
+colnames(dapc.results) <- c("Original_Pop","Sample","Assigned_Pop","Posterior_membership_probability")
+
+p <- ggplot(dapc.results, aes(x=Sample, y=Posterior_membership_probability, fill=Assigned_Pop))+ 
+  geom_bar(stat='identity') +
+  facet_grid(~Original_Pop, scales = "free") +
+  theme(axis.text.x=element_blank(),axis.ticks.x=element_blank())+
+  scale_fill_manual(values=group.colors)
+p
 ```
 
+a tree of pops 
+```{r}
+tree <- aboot(neutral_genpop,tree = "upgma", sample = 100,cutoff = 50)
+
+#cols <- hcl.colors(18, "Zissou1", rev = FALSE)
+
+plot.phylo(tree, cex = 0.8, font = 2, adj = 0, tip.color =  group.colors)
+nodelabels(tree$node.label, adj = c(1.3, -0.5), frame = "n", cex = 0.8,font = 3, xpd = TRUE)
+axis(side = 1)
+title(xlab = "Genetic distance (proportion of loci that are different)")
+```
+
+triangle plot test. probably not the move for this project
+```{r}
+library(dartR)
+library(vcfR)
+#dartR::gl.install.vanilla.dartR(flavour="dev")
+
+tri_test <- neutral_matrix[grep("NESR", rownames(neutral_matrix)), , drop = FALSE]
+
+tri_test_genind <- df2genind(tri_test, sep ="", ploidy=2,NA.char = "00")
+
+tri_test_genlight <- gi2gl(tri_test_genind, parallel = FALSE, verbose = NULL)
+ploidy(tri_test_genlight) <- 2
+
+#DB to try to add sex and chr to this eventually?
+#gota conver to vcf
+setwd("C:/Users/blumsted/Documents")
+tri_test_vcf<-gl2vcf(tri_test_genlight,outpath = getwd(),plink_path = getwd())
+
+setwd("~/projects/ots_coastal")
+library(vcfR)
+#devtools::install_github("omys-omics/triangulaR")
+library(triangulaR)
+
+data <- read.vcfR("gl_vcf.vcf", verbose = F)
+data
+
+tri_test_meta <- dplyr::filter(meta, grepl('NESR', sample))
+
+popmap <- data.frame(
+  id = paste("pop1_",tri_test_meta$sample,sep=""),
+  pop = tri_test_meta$run
+)
+
+popmap[is.na(popmap)] <- "unk"
+
+vcfR.diff <- alleleFreqDiff(vcfR = data, pm = popmap, p1 = "spring", p2 = "fall", difference = 0.9)
+
+hi.het <- hybridIndex(vcfR = data, pm = popmap, p1 = "spring", p2 = "fall")
+
+triangle.plot(hi.het)
+missing.plot(hi.het)
+```
 

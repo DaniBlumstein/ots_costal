@@ -28,34 +28,61 @@ library(cowplot)
 library(gridGraphics)
 library(ggrepel)
 library(magrittr)
+library(psych)
+library(vegan)
 ```
+
+read in the data
+```{r}
+meta<-read.csv("Ots_coastal_2024_meta.csv", header = TRUE)
+genos_all <- read.csv("Ots_coastal_2024_loci_data.csv", header = TRUE)
+
+##read marker information for Ots GT-seq panel
+ots_panel_info<-read_excel("loci_details.xlsx")
+```
+
+
+```{r}
+##put dataset and meta in same order##
+meta<-meta[order(match(meta$sample, genos_all$sample)), ]
+identical(genos_all$sample, meta$sample)
+
+##subset panel info to those markers in the SFGL panel
+ots_SFGL_panel_info<-ots_panel_info[ots_panel_info$marker %in% colnames(genos_all), ]
+```
+
+
+##look at just the 31 Ots run timing markers that made it through filtering 
+subset to run timing markers
+```{r}
+rt_markers<-subset(ots_panel_info, ots_panel_info$`Presumed Type` == "Adaptive Migration Markers")
+run_timing<-genos_all[, c(2, which(colnames(genos_all) %in% rt_markers$marker))]
+
+rt_matrix <- as.matrix(run_timing[,c(2:(ncol(run_timing)))]) 
+row.names(rt_matrix) <- genos_all$sample
+```
+
 
 polarization
 ```{r}
-run_timing<-as.data.frame(genos_all[, c(1, which(colnames(genos_all) %in% rt_markers$Assay))])
-
 ##check both in same order##
 identical(run_timing$sample, meta$sample)
 
+run_timing <- as.data.frame(run_timing)
 row.names(run_timing) <- run_timing$sample
-#run_timing
-#genind_run_timing
 
 ots28_order <- as.data.frame(read.csv("~/projects/ots_coastal/Ots28markers.csv"))
 ots28_order <- ots28_order[order(ots28_order$position, decreasing = F), ]
 
 #remove the loci not in the dataset
-remove <- c('Ots28_11033282','Ots37124-12279142','Ots37124-12281207','Ots28_11143508')
+remove <- c('Ots28_11033282','Ots37124.12279142','Ots37124.12281207','Ots28_11143508')
 ots28_order<-ots28_order[!ots28_order$SFGLID %in%remove,]
 
 ##put markers in chromosomal order##
 run_timing<-run_timing[ots28_order$SFGLID]
 #run_timing<-cbind(meta$run,run_timing)
 
-
-
-
-#now to start a bunch of maniputaion in R for an automated polarization
+#now to start a bunch of maniputaion in R for an automated polarization graph
 
 #make non diagnostic NA
 run_timing_dig <- run_timing
@@ -69,14 +96,14 @@ run_timing_dig$Ots28_11205993 <- "NA"
 run_timing_dig$Ots28_11206740 <- "NA"
 run_timing_dig$Ots28_11207428 <- "NA"
 run_timing_dig$Ots28_11210919 <- "NA"
-run_timing_dig$'Ots37124-12267397' <- "NA"
-run_timing_dig$'Ots37124-12270118' <- "NA"
-run_timing_dig$'Ots37124-12272852' <- "NA"
+run_timing_dig$'Ots37124.12267397' <- "NA"
+run_timing_dig$'Ots37124.12270118' <- "NA"
+run_timing_dig$'Ots37124.12272852' <- "NA"
 
 #transpose the df and use the locus as the row names
 test <- t(run_timing_dig)
-test <- test %>%
-  row_to_names(row_number = 1) 
+#test <- test %>%
+#  row_to_names(row_number = 1) 
 
 #get the run code for each locus 
 runtime_code <- as.data.frame(read_excel("runtime_code.xlsx",sheet = "diag"))
@@ -102,7 +129,7 @@ for (i in 1:ncol(final_df)) {
         runtime_code_order[j, 3], #het geno
         runtime_code_order[j, 4], #spring geno
         runtime_code_order[j, 5], #mising geno "00"
-        runtime_code_order[j, 6]  #NA for uninformred loci
+        runtime_code_order[j, 6]  #NA for uninformed loci
       )
       # Apply str_replace_all (assuming final_df[,i] is a character vector)
       mylist[[i]] <- c(runtime_code_order[j,1],str_replace_all(final_df[,i], setNames(rep_str, replacements)))
@@ -112,36 +139,48 @@ for (i in 1:ncol(final_df)) {
 
 df <- as.data.frame(do.call("rbind",mylist)) #combine all vectors into a matrix
 
-#add the sample names back. I don't like how i did this as i worry it could be innaccurate I just have no clue how to do it otherwise at the moment
+#add the sample names back. I don't like how i did this as i worry it could be inaccurate I just have no clue how to do it otherwise at the moment
 names <- c("locus", rownames(final_df))
 colnames(df) <- names
 
 #order the loci to chr order
-df_order <- df[order(match(rownames(df), ots28_order$SFGLID)), ]
+df_order <- runtime_code_order$locus
 
 # Reshape the dataframe from wide to long format
-df_long <- df_order %>%
+df <- df %>%
   pivot_longer(cols = -locus , names_to = "sample", values_to = "geno")
+ unique(df$geno)
 
-#note neither of these are in chr order and for reasons unknown I can't get ggplot to plot in DF order
 #polarization 
-ggplot(df_long,aes(locus,sample,fill= geno)) + 
+polarization <- ggplot(df,aes(x = factor(locus, levels = df_order),sample,fill= geno)) + 
   geom_tile()+
-  theme(axis.text.x = element_text(angle = 45))
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),axis.text.y = element_text(color = "grey20", size = 5, angle = 0, hjust = 1, vjust = 0, face = "plain"))+
+  scale_fill_manual(values=c("darkorange3", "goldenrod1", "white","darkseagreen"))+
+  scale_x_discrete(position = "top")+
+  #scale_y_discrete(guide = guide_axis(n.dodge=3))+
+  xlab("locus")
+
+ggsave("ots_coastal_R_polarization.pdf",plot=polarization, device = "pdf", dpi = 300, units = "in", width = 8, height = 20, bg = NULL)
 
 #add allllll the metadata in 
-df_long_merge<- merge(df_long,meta,by = "sample")
+df_long_merge<- merge(df,meta,by = "sample")
 
-#funtion to calculate proportion of genotypic run
+#function to calculate proportion of genotypic run
 prop <- function(count, group) {
   count / tapply(count, group, sum)[group]
 }
 
-ggplot(df_long_merge, aes(x = run, y = prop(after_stat(count), after_stat(x)),
+proportion <- ggplot(df_long_merge, aes(x = factor(locus, levels = df_order), y = prop(after_stat(count), after_stat(x)),
   fill = geno, after_stat(x)))+ 
-   geom_bar(position = position_fill())+
-  facet_grid(Population~locus)+
+  geom_bar(position = position_fill())+
+  facet_grid(Population~run)+
+  scale_fill_manual(values=c("darkorange3", "goldenrod1", "white","darkseagreen"))+
+  xlab("locus")+
+  ylab("proportion")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))+
   ggtheme
+
+ggsave("ots_coastal_run_proportions.pdf",plot=proportion, device = "pdf", dpi = 300, units = "in", width = 18, height = 18, bg = NULL)
 
 # add metadata to the raw data from waaaaay back when. did this at the end as its just ended up being cleaner
 run_timing<-cbind(meta,run_timing)
@@ -153,6 +192,9 @@ write.xlsx(run_timing, quote = FALSE, rownames = FALSE, file = "runtiming_genoty
 
 individual level PCA (missing data filled in with mean genotype)
 ```{r}
+colnames(rt_matrix) <- gsub("\\.", "_", colnames(rt_matrix))
+genind_run_timing <- df2genind(rt_matrix, sep ="", ploidy=2,NA.char = "00")
+
 nm_df<-as.data.frame(rownames(genind_run_timing$tab))
 colnames(nm_df)<-"sample"
 identical(nm_df$sample, meta$sample)
@@ -219,8 +261,8 @@ ggplot(data = ind_coords, aes(x = Axis1, y = Axis2))+
   # centroids
   geom_label(data = centroid, aes(label = Site, fill = Site), size = 4, show.legend = FALSE)+
   # colouring
-  #scale_fill_manual(values = cols)+
-  #scale_colour_manual(values = cols)+
+  scale_fill_manual(values = group.colors)+
+  scale_colour_manual(values = group.colors)+
   # custom labels
   labs(x = xlab, y = ylab)+
   ggtitle("runtiming PCA")+
@@ -254,7 +296,34 @@ ggplot(pop_pcs)+
   geom_point(aes(Axis1, Axis2, color = pop), alpha = 0.7, size = 5.0)+
   geom_text_repel(aes(x=Axis1, y=Axis2, label = pop), nudge_x = 0.015, nudge_y = 0.015, size = 4, alpha = 0.8, force = 6, max.overlaps = 15, min.segment.length = 0.8, segment.colour = "darkgrey", segment.size = 1) +
   xlab("PC1 72.3%")+
-  ylab("PC2 27.3%")
+  ylab("PC2 27.3%")+
+  scale_color_manual(values=group.colors)
+```
+
+tree
+```{r}
+tree <- aboot(run_timing_genpop,tree = "upgma", sample = 100,cutoff = 50)
+
+plot.phylo(tree, cex = 0.8, font = 2, adj = 0, tip.color =  group.colors)
+nodelabels(tree$node.label, adj = c(1.3, -0.5), frame = "n", cex = 0.8,font = 3, xpd = TRUE)
+axis(side = 1)
+title(xlab = "Genetic distance (proportion of loci that are different)")
+
 ```
 
 CCA and RDA
+
+hmmmmm rda can't be done on datasets w/ missing data :(
+```{r}
+#impute using the most common genotype at each SNP across all individuals.
+gen.imp <- apply(rt_matrix, 2, function(x) replace(x, is.na(x), as.numeric(names(which.max(table(x))))))
+sum(is.na(gen.imp)) # No NAs
+
+str(meta)
+
+# Confirm that genotypes and environmental data are in the same order
+identical(rownames(gen.imp), meta[,2]) 
+
+pairs.panels(meta[,c(4,6,7,9)], scale=T)
+```
+
